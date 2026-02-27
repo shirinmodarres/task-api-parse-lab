@@ -153,7 +153,6 @@ Parse.Cloud.define("tasksByStatus", async (request) => {
   if (!user) throw new Error("Not authorized");
 
   const { status, limit = 10, skip = 0 } = request.params;
-
   if (!status || typeof status !== "string") throw new Error("status is required");
 
   const lim = Math.min(Math.max(Number(limit) || 10, 1), 50); // 1..50
@@ -163,12 +162,16 @@ Parse.Cloud.define("tasksByStatus", async (request) => {
   query.equalTo("owner", user);
   query.equalTo("status", status);
   query.descending("createdAt");
+
+  // total count (for pagination UI)
+  const total = await query.count();
+
+  // page
   query.limit(lim);
   query.skip(sk);
-
   const results = await query.find();
 
-  return results.map((t) => ({
+  const items = results.map((t) => ({
     id: t.id,
     title: t.get("title"),
     status: t.get("status"),
@@ -176,6 +179,10 @@ Parse.Cloud.define("tasksByStatus", async (request) => {
     dueDate: t.get("dueDate"),
     createdAt: t.createdAt,
   }));
+
+  const nextSkip = sk + items.length < total ? sk + items.length : null;
+
+  return { items, total, limit: lim, skip: sk, nextSkip };
 });
 
 Parse.Cloud.define("setTaskStatus", async (request) => {
