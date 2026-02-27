@@ -63,3 +63,35 @@ Parse.Cloud.define("myTasks", async (request) => {
     createdAt: t.createdAt,
   }));
 });
+
+Parse.Cloud.define("toggleTaskDone", async (request) => {
+  const user = request.user;
+  if (!user) throw new Error("Not authorized");
+
+  const { taskId, done } = request.params;
+  if (!taskId) throw new Error("taskId is required");
+  if (typeof done !== "boolean") throw new Error("done must be boolean");
+
+  const query = new Parse.Query("Task");
+  query.equalTo("owner", user); // extra safety
+  const task = await query.get(taskId); // respects ACL too
+
+  task.set("done", done);
+  await task.save();
+  return { id: task.id, done: task.get("done") };
+});
+
+Parse.Cloud.define("deleteTask", async (request) => {
+  const user = request.user;
+  if (!user) throw new Error("Not authorized");
+
+  const { taskId } = request.params;
+  if (!taskId) throw new Error("taskId is required");
+
+  const query = new Parse.Query("Task");
+  query.equalTo("owner", user);
+  const task = await query.get(taskId);
+
+  await task.destroy();
+  return { id: taskId, deleted: true };
+});
