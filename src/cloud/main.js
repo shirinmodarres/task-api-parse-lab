@@ -8,6 +8,16 @@ Parse.Cloud.define("hello", async () => {
 const ALLOWED_PRIORITY = ["low", "med", "high"];
 const ALLOWED_STATUS = ["todo", "in_progress", "done", "canceled"];
 
+function getSessionToken(request) {
+  return request.headers?.["x-parse-session-token"];
+}
+
+function requireSessionToken(request) {
+  const t = getSessionToken(request);
+  if (!t) throw new Error("Not authorized");
+  return t;
+}
+
 Parse.Cloud.beforeSave("Task", async (request) => {
   const user = request.user;
   if (!user) throw new Error("Not authorized");
@@ -61,6 +71,7 @@ Parse.Cloud.beforeSave("Task", async (request) => {
 Parse.Cloud.define("createTask", async (request) => {
   const user = request.user;
   if (!user) throw new Error("Not authorized");
+  const token = requireSessionToken(request);
 
   const { title, priority, status, dueDate } = request.params;
 
@@ -87,7 +98,8 @@ Parse.Cloud.define("createTask", async (request) => {
   acl.setPublicWriteAccess(false);
   task.setACL(acl);
 
-  await task.save();
+  // Pass sessionToken so triggers receive request.user
+  await task.save(null, { sessionToken: token });
 
   return {
     id: task.id,
@@ -102,12 +114,13 @@ Parse.Cloud.define("createTask", async (request) => {
 Parse.Cloud.define("myTasks", async (request) => {
   const user = request.user;
   if (!user) throw new Error("Not authorized");
+  const token = requireSessionToken(request);
 
   const query = new Parse.Query("Task");
   query.equalTo("owner", user);
   query.descending("createdAt");
 
-  const results = await query.find();
+  const results = await query.find({ sessionToken: token });
   return results.map((t) => ({
     id: t.id,
     title: t.get("title"),
@@ -119,6 +132,7 @@ Parse.Cloud.define("myTasks", async (request) => {
 Parse.Cloud.define("toggleTaskDone", async (request) => {
   const user = request.user;
   if (!user) throw new Error("Not authorized");
+  const token = requireSessionToken(request);
 
   const { taskId, done } = request.params;
   if (!taskId) throw new Error("taskId is required");
@@ -126,31 +140,34 @@ Parse.Cloud.define("toggleTaskDone", async (request) => {
 
   const query = new Parse.Query("Task");
   query.equalTo("owner", user); // extra safety
-  const task = await query.get(taskId); // respects ACL too
+  const task = await query.get(taskId, { sessionToken: token }); // respects ACL too
 
   task.set("done", done);
-  await task.save();
+  // Pass sessionToken so triggers receive request.user
+  await task.save(null, { sessionToken: token });
   return { id: task.id, done: task.get("done") };
 });
 
 Parse.Cloud.define("deleteTask", async (request) => {
   const user = request.user;
   if (!user) throw new Error("Not authorized");
+  const token = requireSessionToken(request);
 
   const { taskId } = request.params;
   if (!taskId) throw new Error("taskId is required");
 
   const query = new Parse.Query("Task");
   query.equalTo("owner", user);
-  const task = await query.get(taskId);
+  const task = await query.get(taskId, { sessionToken: token });
 
-  await task.destroy();
+  await task.destroy({ sessionToken: token });
   return { id: taskId, deleted: true };
 });
 
 Parse.Cloud.define("tasksByStatus", async (request) => {
   const user = request.user;
   if (!user) throw new Error("Not authorized");
+  const token = requireSessionToken(request);
 
   const { status, limit = 10, skip = 0 } = request.params;
   if (!status || typeof status !== "string") throw new Error("status is required");
@@ -164,12 +181,12 @@ Parse.Cloud.define("tasksByStatus", async (request) => {
   query.descending("createdAt");
 
   // total count (for pagination UI)
-  const total = await query.count();
+  const total = await query.count({ sessionToken: token });
 
   // page
   query.limit(lim);
   query.skip(sk);
-  const results = await query.find();
+  const results = await query.find({ sessionToken: token });
 
   const items = results.map((t) => ({
     id: t.id,
@@ -188,6 +205,7 @@ Parse.Cloud.define("tasksByStatus", async (request) => {
 Parse.Cloud.define("setTaskStatus", async (request) => {
   const user = request.user;
   if (!user) throw new Error("Not authorized");
+  const token = requireSessionToken(request);
 
   const { taskId, status } = request.params;
   if (!taskId) throw new Error("taskId is required");
@@ -196,12 +214,13 @@ Parse.Cloud.define("setTaskStatus", async (request) => {
   const query = new Parse.Query("Task");
   query.equalTo("owner", user);
 
-  const task = await query.get(taskId);
+  const task = await query.get(taskId, { sessionToken: token });
 
   task.set("status", status); // validated in beforeSave
   task.set("done", status === "done"); // keep legacy in sync (optional)
 
-  await task.save();
+  // Pass sessionToken so triggers receive request.user
+  await task.save(null, { sessionToken: token });
 
   return { id: task.id, status: task.get("status") };
 });
